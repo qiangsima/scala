@@ -20,7 +20,6 @@ import scala.collection.mutable
  *  and create fresh symbols for new local definitions.
  *
  *  @author  Iulian Dragos
- *  @version 1.0
  */
 abstract class Duplicators extends Analyzer {
   import global._
@@ -174,7 +173,8 @@ abstract class Duplicators extends Analyzer {
 
           case DefDef(_, name, tparams, vparamss, _, rhs) =>
             // invalidate parameters
-            invalidateAll(tparams ::: vparamss.flatten)
+            invalidateAll(tparams)
+            vparamss foreach (x => invalidateAll(x))
             tree.symbol = NoSymbol
 
           case Function(vparams, _) =>

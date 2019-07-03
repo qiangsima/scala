@@ -14,6 +14,7 @@ package scala.reflect.macros
 package compiler
 
 import java.lang.System.{lineSeparator => EOL}
+import scala.annotation.tailrec
 import scala.reflect.macros.util.Traces
 
 trait Errors extends Traces {
@@ -104,8 +105,9 @@ trait Errors extends Traces {
     private def checkConforms(slot: String, rtpe: Type, atpe: Type) = {
       val verbose = macroDebugVerbose
 
+      @tailrec
       def check(rtpe: Type, atpe: Type): Boolean = {
-        def success() = { if (verbose) println(rtpe + " <: " + atpe + "?" + EOL + "true"); true }
+        def success() = { if (verbose) println(f"$rtpe <: $atpe?%ntrue"); true }
         (rtpe, atpe) match {
           case _ if rtpe eq atpe => success()
           case (TypeRef(_, RepeatedParamClass, rtpe :: Nil), TypeRef(_, RepeatedParamClass, atpe :: Nil)) => check(rtpe, atpe)

@@ -13,14 +13,12 @@
 package scala.collection
 package mutable
 
-import scala.annotation.meta.{getter, setter}
 import scala.annotation.tailrec
+import scala.collection.Stepper.EfficientSplit
 import scala.collection.generic.DefaultSerializationProxy
 
 /** This class implements mutable maps using a hashtable.
   *
-  *  @author  Stefan Zeiger
-  *  @since 1
   *  @see [[http://docs.scala-lang.org/overviews/collections/concrete-mutable-collection-classes.html#hash-tables "Scala's Collection Library overview"]]
   *  section on `Hash Tables` for more information.
   *
@@ -37,7 +35,9 @@ class HashMap[K, V](initialCapacity: Int, loadFactor: Double)
   extends AbstractMap[K, V]
     with MapOps[K, V, HashMap, HashMap[K, V]]
     with StrictOptimizedIterableOps[(K, V), Iterable, HashMap[K, V]]
-    with StrictOptimizedMapOps[K, V, HashMap, HashMap[K, V]] {
+    with StrictOptimizedMapOps[K, V, HashMap, HashMap[K, V]]
+    with MapFactoryDefaults[K, V, HashMap, Iterable]
+    with Serializable {
 
   def this() = this(HashMap.defaultInitialCapacity, HashMap.defaultLoadFactor)
 
@@ -53,13 +53,23 @@ class HashMap[K, V](initialCapacity: Int, loadFactor: Double)
 
   override def size: Int = contentSize
 
-  @`inline` private[this] def computeHash(o: K): Int = {
+  /** Performs the inverse operation of improveHash. In this case, it happens to be identical to improveHash*/
+  @`inline` private[collection] def unimproveHash(improvedHash: Int): Int = improveHash(improvedHash)
+
+  /** Computes the improved hash of an original (`any.##`) hash. */
+  @`inline` private[this] def improveHash(originalHash: Int): Int = {
     // Improve the hash by xoring the high 16 bits into the low 16 bits just in case entropy is skewed towards the
     // high-value bits. We only use the lowest bits to determine the hash bucket. This is the same improvement
     // algorithm as in java.util.HashMap.
-    val h = o.##
-    h ^ (h >>> 16)
+    //
+    // This function is also its own inverse. That is, for all ints i, improveHash(improveHash(i)) = i
+    // this allows us to retrieve the original hash when we need it, for instance when appending to an immutable.HashMap
+    // and that is why unimproveHash simply forwards to this method
+    originalHash ^ (originalHash >>> 16)
   }
+
+  /** Computes the improved hash of this key */
+  @`inline` private[this] def computeHash(o: K): Int = improveHash(o.##)
 
   @`inline` private[this] def index(hash: Int) = hash & (table.length - 1)
 
@@ -80,7 +90,57 @@ class HashMap[K, V](initialCapacity: Int, loadFactor: Double)
 
   override def addAll(xs: IterableOnce[(K, V)]): this.type = {
     sizeHint(xs.knownSize)
-    super.addAll(xs)
+
+    xs match {
+      case hm: immutable.HashMap[K, V] =>
+        hm.foreachWithHash((k, v, h) => put0(k, v, improveHash(h), getOld = false))
+        this
+      case hm: mutable.HashMap[K, V] =>
+        val iter = hm.nodeIterator
+        while (iter.hasNext) {
+          val next = iter.next()
+          put0(next.key, next.value, next.hash, getOld = false)
+        }
+        this
+      case _ => super.addAll(xs)
+    }
+  }
+
+  override def subtractAll(xs: IterableOnce[K]): this.type = {
+    if (size == 0) {
+      return this
+    }
+
+    xs match {
+      case hs: immutable.HashSet[K] =>
+        hs.foreachWithHashWhile { (k, h) =>
+          remove0(k, improveHash(h))
+          size > 0
+        }
+        this
+      case hs: mutable.HashSet[K] =>
+        val iter = hs.nodeIterator
+        while (iter.hasNext) {
+          val next = iter.next()
+          remove0(next.key, next.hash)
+          if (size == 0) return this
+        }
+        this
+      case _ => super.subtractAll(xs)
+    }
+  }
+
+  /** Adds a key-value pair to this map
+    *
+    * @param key the key to add
+    * @param value the value to add
+    * @param hash the **improved** hashcode of `key` (see computeHash)
+    * @param getOld if true, then the previous value for `key` will be returned, otherwise, false
+    */
+  private[this] def put0(key: K, value: V, hash: Int, getOld: Boolean): Some[V] = {
+    if(contentSize + 1 >= threshold) growTable(table.length * 2)
+    val idx = index(hash)
+    put0(key, value, getOld, hash, idx)
   }
 
   private[this] def put0(key: K, value: V, getOld: Boolean): Some[V] = {
@@ -89,6 +149,7 @@ class HashMap[K, V](initialCapacity: Int, loadFactor: Double)
     val idx = index(hash)
     put0(key, value, getOld, hash, idx)
   }
+
 
   private[this] def put0(key: K, value: V, getOld: Boolean, hash: Int, idx: Int): Some[V] = {
     table(idx) match {
@@ -101,7 +162,7 @@ class HashMap[K, V](initialCapacity: Int, loadFactor: Double)
           if(n.hash == hash && key == n.key) {
             val old = n.value
             n.value = value
-            return (if(getOld) Some(old) else null)
+            return if(getOld) Some(old) else null
           }
           prev = n
           n = n.next
@@ -113,9 +174,16 @@ class HashMap[K, V](initialCapacity: Int, loadFactor: Double)
     null
   }
 
-  private def remove0(elem: K) : Node[K, V] = {
-    val hash = computeHash(elem)
-    var idx = index(hash)
+  private def remove0(elem: K) : Node[K, V] = remove0(elem, computeHash(elem))
+
+  /** Removes a key from this map if it exists
+    *
+    * @param elem the element to remove
+    * @param hash the **improved** hashcode of `element` (see computeHash)
+    * @return the node that contained element if it was present, otherwise null
+    */
+  private[this] def remove0(elem: K, hash: Int) : Node[K, V] = {
+    val idx = index(hash)
     table(idx) match {
       case null => null
       case nd if nd.hash == hash && nd.key == elem =>
@@ -185,6 +253,41 @@ class HashMap[K, V](initialCapacity: Int, loadFactor: Double)
     else new HashMapIterator[V] {
       protected[this] def extract(nd: Node[K, V]) = nd.value
     }
+
+
+  /** Returns an iterator over the nodes stored in this HashMap */
+  private[collection] def nodeIterator: Iterator[Node[K, V]] =
+    if(size == 0) Iterator.empty
+    else new HashMapIterator[Node[K, V]] {
+      protected[this] def extract(nd: Node[K, V]) = nd
+    }
+
+  override def stepper[S <: Stepper[_]](implicit shape: StepperShape[(K, V), S]): S with EfficientSplit =
+    shape.
+      parUnbox(new convert.impl.AnyTableStepper[(K, V), Node[K, V]](size, table, _.next, node => (node.key, node.value), 0, table.length)).
+      asInstanceOf[S with EfficientSplit]
+
+  override def keyStepper[S <: Stepper[_]](implicit shape: StepperShape[K, S]): S with EfficientSplit = {
+    import convert.impl._
+    val s = shape.shape match {
+      case StepperShape.IntShape    => new IntTableStepper[Node[K, V]]   (size, table, _.next, _.key.asInstanceOf[Int],    0, table.length)
+      case StepperShape.LongShape   => new LongTableStepper[Node[K, V]]  (size, table, _.next, _.key.asInstanceOf[Long],   0, table.length)
+      case StepperShape.DoubleShape => new DoubleTableStepper[Node[K, V]](size, table, _.next, _.key.asInstanceOf[Double], 0, table.length)
+      case _         => shape.parUnbox(new AnyTableStepper[K, Node[K, V]](size, table, _.next, _.key,                      0, table.length))
+    }
+    s.asInstanceOf[S with EfficientSplit]
+  }
+
+  override def valueStepper[S <: Stepper[_]](implicit shape: StepperShape[V, S]): S with EfficientSplit = {
+    import convert.impl._
+    val s = shape.shape match {
+      case StepperShape.IntShape    => new IntTableStepper[Node[K, V]]   (size, table, _.next, _.value.asInstanceOf[Int],    0, table.length)
+      case StepperShape.LongShape   => new LongTableStepper[Node[K, V]]  (size, table, _.next, _.value.asInstanceOf[Long],   0, table.length)
+      case StepperShape.DoubleShape => new DoubleTableStepper[Node[K, V]](size, table, _.next, _.value.asInstanceOf[Double], 0, table.length)
+      case _         => shape.parUnbox(new AnyTableStepper[V, Node[K, V]](size, table, _.next, _.value,                      0, table.length))
+    }
+    s.asInstanceOf[S with EfficientSplit]
+  }
 
   private[this] def growTable(newlen: Int) = {
     var oldlen = table.length
@@ -317,7 +420,41 @@ class HashMap[K, V](initialCapacity: Int, loadFactor: Double)
     }
   }
 
-  override protected[this] def writeReplace(): AnyRef = new DefaultSerializationProxy(new mutable.HashMap.DeserializationFactory[K, V](table.length, loadFactor), this)
+  protected[this] def writeReplace(): AnyRef = new DefaultSerializationProxy(new mutable.HashMap.DeserializationFactory[K, V](table.length, loadFactor), this)
+
+  override def filterInPlace(p: (K, V) => Boolean): this.type = {
+    if (nonEmpty) {
+      var bucket = 0
+
+      while (bucket < table.length) {
+        var head = table(bucket)
+
+        while ((head ne null) && !p(head.key, head.value)) {
+          head = head.next
+          contentSize -= 1
+        }
+
+        if (head ne null) {
+          var prev = head
+          var next = head.next
+
+          while (next ne null) {
+            if (p(next.key, next.value)) {
+              prev = next
+            } else {
+              prev.next = next.next
+              contentSize -= 1
+            }
+            next = next.next
+          }
+        }
+
+        table(bucket) = head
+        bucket += 1
+      }
+    }
+    this
+  }
 
   override def mapFactory: MapFactory[HashMap] = HashMap
 
@@ -359,7 +496,7 @@ object HashMap extends MapFactory[HashMap] {
     def newBuilder: Builder[(K, V), HashMap[K, V]] = HashMap.newBuilder(tableLength, loadFactor)
   }
 
-  private final class Node[K, V](_key: K, _hash: Int, private[this] var _value: V, private[this] var _next: Node[K, V]) {
+  private[collection] final class Node[K, V](_key: K, _hash: Int, private[this] var _value: V, private[this] var _next: Node[K, V]) {
     def key: K = _key
     def hash: Int = _hash
     def value: V = _value

@@ -13,9 +13,9 @@
 package scala
 package collection.immutable
 
-import collection.{AbstractIterator, Iterator}
-import java.lang.String
-
+import scala.collection.Stepper.EfficientSplit
+import scala.collection.convert.impl.RangeStepper
+import scala.collection.{AbstractIterator, AnyStepper, IterableFactoryDefaults, Iterator, Stepper, StepperShape}
 import scala.util.hashing.MurmurHash3
 
 /** The `Range` class represents integer values in range
@@ -64,9 +64,22 @@ sealed abstract class Range(
   extends AbstractSeq[Int]
     with IndexedSeq[Int]
     with IndexedSeqOps[Int, IndexedSeq, IndexedSeq[Int]]
-    with StrictOptimizedSeqOps[Int, IndexedSeq, IndexedSeq[Int]] { range =>
+    with StrictOptimizedSeqOps[Int, IndexedSeq, IndexedSeq[Int]]
+    with IterableFactoryDefaults[Int, IndexedSeq]
+    with Serializable { range =>
 
   final override def iterator: Iterator[Int] = new RangeIterator(start, step, lastElement, isEmpty)
+
+  override final def stepper[S <: Stepper[_]](implicit shape: StepperShape[Int, S]): S with EfficientSplit = {
+    val st = new RangeStepper(start, step, 0, length)
+    val r =
+      if (shape.shape == StepperShape.IntShape) st
+      else {
+        assert(shape.shape == StepperShape.ReferenceShape, s"unexpected StepperShape: $shape")
+        AnyStepper.ofParIntStepper(st)
+      }
+    r.asInstanceOf[S with EfficientSplit]
+  }
 
   private[this] def gap           = end.toLong - start.toLong
   private[this] def isExact       = gap % step == 0
@@ -107,8 +120,10 @@ sealed abstract class Range(
   /** The last element of this range.  This method will return the correct value
     *  even if there are too many elements to iterate over.
     */
-  final override def last: Int = if (isEmpty) Nil.head else lastElement
-  final override def head: Int = if (isEmpty) Nil.head else start
+  final override def last: Int =
+    if (isEmpty) throw Range.emptyRangeError("last") else lastElement
+  final override def head: Int =
+    if (isEmpty) throw Range.emptyRangeError("head") else start
 
   /** Creates a new range containing all the elements of this range except the last one.
     *
@@ -116,12 +131,8 @@ sealed abstract class Range(
     *
     *  @return  a new range consisting of all the elements of this range except the last one.
     */
-  final override def init: Range = {
-    if (isEmpty)
-      Nil.init
-
-    dropRight(1)
-  }
+  final override def init: Range =
+    if (isEmpty) throw Range.emptyRangeError("init") else dropRight(1)
 
   /** Creates a new range containing all the elements of this range except the first one.
     *
@@ -130,8 +141,7 @@ sealed abstract class Range(
     *  @return  a new range consisting of all the elements of this range except the first one.
     */
   final override def tail: Range = {
-    if (isEmpty)
-      Nil.tail
+    if (isEmpty) throw Range.emptyRangeError("tail")
     if (numRangeElements == 1) newEmptyRange(end)
     else if(isInclusive) new Range.Inclusive(start + step, end, step)
     else new Range.Exclusive(start + step, end, step)
@@ -182,6 +192,38 @@ sealed abstract class Range(
         i += step
       }
     }
+  }
+
+  override final def indexOf[@specialized(Int) B >: Int](elem: B, from: Int = 0): Int =
+    elem match {
+      case i: Int =>
+        val pos = posOf(i)
+        if (pos >= from) pos else -1
+      case _ => super.indexOf(elem, from)
+    }
+
+  override final def lastIndexOf[@specialized(Int) B >: Int](elem: B, end: Int = length - 1): Int =
+    elem match {
+      case i: Int =>
+        val pos = posOf(i)
+        if (pos <= end) pos else -1
+      case _ => super.lastIndexOf(elem, end)
+    }
+
+  private[this] def posOf(i: Int): Int =
+    if (contains(i)) (i - start) / step else -1
+
+  override def sameElements[B >: Int](that: IterableOnce[B]): Boolean = that match {
+    case other: Range =>
+      (this.length : @annotation.switch) match {
+        case 0 => other.isEmpty
+        case 1 => other.length == 1 && this.start == other.start
+        case n => other.length == n && (
+          (this.start == other.start)
+            && (this.step == other.step)
+        )
+      }
+    case _ => super.sameElements(that)
   }
 
   /** Creates a new range containing the first `n` elements of this range.
@@ -338,6 +380,11 @@ sealed abstract class Range(
       else (step == -1) || (((x - start) % step) == 0)
     }
   }
+  /* Seq#contains has a type parameter so the optimised contains above doesn't override it */
+  override final def contains[B >: Int](elem: B): Boolean = elem match {
+    case i: Int => this.contains(i)
+    case _      => super.contains(elem)
+  }
 
   final override def sum[B >: Int](implicit num: Numeric[B]): Int = {
     if (num eq scala.math.Numeric.IntIsIntegral) {
@@ -365,7 +412,7 @@ sealed abstract class Range(
     if (ord eq Ordering.Int) {
       if (step > 0) head
       else last
-    } else if (ord eq Ordering.Int.reverse) {
+    } else if (Ordering.Int isReverseOf ord) {
       if (step > 0) last
       else head
     } else super.min(ord)
@@ -374,7 +421,7 @@ sealed abstract class Range(
     if (ord eq Ordering.Int) {
       if (step > 0) last
       else head
-    } else if (ord eq Ordering.Int.reverse) {
+    } else if (Ordering.Int isReverseOf ord) {
       if (step > 0) head
       else last
     } else super.max(ord)
@@ -435,8 +482,6 @@ sealed abstract class Range(
     val prefix = if (isEmpty) "empty " else if (!isExact) "inexact " else ""
     s"${prefix}Range $start $preposition $end$stepped"
   }
-
-  final override protected[this] def writeReplace(): AnyRef = this
 
   override protected[this] def className = "Range"
 
@@ -582,6 +627,8 @@ object Range {
     def inclusive(start: Int, end: Int, step: Int) = NumericRange.inclusive(start, end, step)
   }
 
+  private def emptyRangeError(what: String): Throwable =
+    new NoSuchElementException(what + " on empty Range")
 }
 
 /**
@@ -609,15 +656,17 @@ private class RangeIterator(
   }
 
   override def drop(n: Int): Iterator[Int] = {
-    val longPos = _next.toLong + step * n
-    if (step > 0) {
-      _next = Math.min(lastElement, longPos).toInt
-      _hasNext = longPos <= lastElement
+    if (n > 0) {
+      val longPos = _next.toLong + step * n
+      if (step > 0) {
+        _next = Math.min(lastElement, longPos).toInt
+        _hasNext = longPos <= lastElement
+      }
+      else if (step < 0) {
+        _next = Math.max(lastElement, longPos).toInt
+        _hasNext = longPos >= lastElement
+      }
     }
-    else if (step < 0) {
-      _next = Math.max(lastElement, longPos).toInt
-      _hasNext = longPos >= lastElement
-    }
-    this
+      this
   }
 }

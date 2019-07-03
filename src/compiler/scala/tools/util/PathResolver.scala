@@ -206,7 +206,8 @@ object PathResolver {
     }
 }
 
-final class PathResolver(settings: Settings, closeableRegistry: CloseableRegistry) {
+final class PathResolver(settings: Settings, closeableRegistry: CloseableRegistry = new CloseableRegistry) {
+
   private val classPathFactory = new ClassPathFactory(settings, closeableRegistry)
 
   import PathResolver.{ AsLines, Defaults, ppcp }

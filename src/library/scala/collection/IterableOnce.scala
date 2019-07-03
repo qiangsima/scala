@@ -13,15 +13,29 @@
 package scala
 package collection
 
-import scala.language.{higherKinds, implicitConversions}
 import scala.annotation.unchecked.uncheckedVariance
+import scala.collection.mutable.StringBuilder
+import scala.language.{higherKinds, implicitConversions}
 import scala.math.{Numeric, Ordering}
 import scala.reflect.ClassTag
-import scala.collection.mutable.StringBuilder
 
 /**
   * A template trait for collections which can be traversed either once only
   * or one or more times.
+  *
+  * Note: `IterableOnce` does not extend [[IterableOnceOps]]. This is different than the general
+  * design of the collections library, which uses the following pattern:
+  * {{{
+  *   trait Seq extends Iterable with SeqOps
+  *   trait SeqOps extends IterableOps
+  *
+  *   trait IndexedSeq extends Seq with IndexedSeqOps
+  *   trait IndexedSeqOps extends SeqOps
+  * }}}
+  *
+  * The goal is to provide a minimal interface without any sequential operations. This allows
+  * third-party extension like Scala parallel collections to integrate at the level of IterableOnce
+  * without inheriting unwanted implementations.
   *
   * @define coll collection
   */
@@ -29,10 +43,41 @@ trait IterableOnce[+A] extends Any {
   /** Iterator can be used only once */
   def iterator: Iterator[A]
 
+  /** Returns a [[Stepper]] for the elements of this collection.
+    *
+    * The Stepper enables creating a Java stream to operate on the collection, see
+    * [[scala.jdk.StreamConverters]]. For collections holding primitive values, the Stepper can be
+    * used as an iterator which doesn't box the elements.
+    *
+    * The implicit [[StepperShape]] parameter defines the resulting Stepper type according to the
+    * element type of this collection.
+    *
+    *   - For collections of `Int`, `Short`, `Byte` or `Char`, an [[IntStepper]] is returned
+    *   - For collections of `Double` or `Float`, a [[DoubleStepper]] is returned
+    *   - For collections of `Long` a [[LongStepper]] is returned
+    *   - For any other element type, an [[AnyStepper]] is returned
+    *
+    * Note that this method is overridden in subclasses and the return type is refined to
+    * `S with EfficientSplit`, for example [[IndexedSeqOps.stepper]]. For Steppers marked with
+    * [[scala.collection.Stepper.EfficientSplit]], the converters in [[scala.jdk.StreamConverters]]
+    * allow creating parallel streams, whereas bare Steppers can be converted only to sequential
+    * streams.
+    */
+  def stepper[S <: Stepper[_]](implicit shape: StepperShape[A, S]): S = {
+    import convert.impl._
+    val s = shape.shape match {
+      case StepperShape.IntShape    => new IntIteratorStepper   (iterator.asInstanceOf[Iterator[Int]])
+      case StepperShape.LongShape   => new LongIteratorStepper  (iterator.asInstanceOf[Iterator[Long]])
+      case StepperShape.DoubleShape => new DoubleIteratorStepper(iterator.asInstanceOf[Iterator[Double]])
+      case _                        => shape.seqUnbox(new AnyIteratorStepper[A](iterator))
+    }
+    s.asInstanceOf[S]
+  }
+
   /** @return The number of elements in this $coll, if it can be cheaply computed,
     *  -1 otherwise. Cheaply usually means: Not requiring a collection traversal.
     */
-  def knownSize: Int
+  def knownSize: Int = -1
 }
 
 final class IterableOnceExtensionMethods[A](private val it: IterableOnce[A]) extends AnyVal {
@@ -262,7 +307,6 @@ object IterableOnce {
   *
   */
 trait IterableOnceOps[+A, +CC[_], +C] extends Any { this: IterableOnce[A] =>
-
   /////////////////////////////////////////////////////////////// Abstract methods that must be implemented
 
   /** Produces a $coll containing cumulative results of applying the
@@ -295,7 +339,7 @@ trait IterableOnceOps[+A, +CC[_], +C] extends Any { this: IterableOnce[A] =>
     */
   def filterNot(pred: A => Boolean): C
 
-  /** Selects first ''n'' elements.
+  /** Selects the first ''n'' elements.
     *  $orderDependent
     *  @param  n    the number of elements to take from this $coll.
     *  @return a $coll consisting only of the first `n` elements of this $coll,
@@ -458,6 +502,22 @@ trait IterableOnceOps[+A, +CC[_], +C] extends Any { this: IterableOnce[A] =>
     */
   def span(p: A => Boolean): (C, C)
 
+  /** Splits this $coll into a prefix/suffix pair at a given position.
+   *
+   *  Note: `c splitAt n` is equivalent to (but possibly more efficient than)
+   *         `(c take n, c drop n)`.
+   *  $orderDependent
+   *
+   *  @param n the position at which to split.
+   *  @return  a pair of ${coll}s consisting of the first `n`
+   *           elements of this $coll, and the other elements.
+   *  @note    Reuse: $consumesOneAndProducesTwoIterators
+   */
+  def splitAt(n: Int): (C, C) = {
+    var i = 0
+    span { _ => if (i < n) { i += 1; true } else false }
+  }
+
   /** Applies a side-effecting function to each element in this collection.
     * Strict collections will apply `f` to their elements immediately, while lazy collections
     * like Views and LazyLists will only apply `f` on each element if and when that element
@@ -470,8 +530,6 @@ trait IterableOnceOps[+A, +CC[_], +C] extends Any { this: IterableOnce[A] =>
   def tapEach[U](f: A => U): C
 
   /////////////////////////////////////////////////////////////// Concrete methods based on iterator
-
-  def knownSize: Int = -1
 
   /** Tests whether this $coll is known to have a finite size.
     *  All strict collections are known to have finite size. For a non-strict
@@ -641,7 +699,6 @@ trait IterableOnceOps[+A, +CC[_], +C] extends Any { this: IterableOnce[A] =>
     *  @param op      a binary operator that must be associative.
     *  @return        the result of applying the fold operator `op` between all the elements and `z`, or `z` if this $coll is empty.
     */
-  @deprecated("Use foldLeft instead", "2.13.0")
   def fold[A1 >: A](z: A1)(op: (A1, A1) => A1): A1 = foldLeft(z)(op)
 
   /** Reduces the elements of this $coll using the specified associative binary operator.

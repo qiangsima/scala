@@ -14,19 +14,51 @@ package scala
 package collection
 package immutable
 
+import scala.annotation.unchecked.uncheckedVariance
+import scala.collection.Stepper.EfficientSplit
+import scala.collection.generic.DefaultSerializable
 import scala.collection.immutable.{RedBlackTree => RB}
-import scala.collection.mutable.{Builder, ReusableBuilder}
+import scala.collection.mutable.ReusableBuilder
 
-
-/** This class implements immutable maps using a tree.
+/** An immutable SortedMap whose values are stored in a red-black tree.
+  *
+  * This class is optimal when range queries will be performed,
+  * or when traversal in order of an ordering is desired.
+  * If you only need key lookups, and don't care in which order key-values
+  * are traversed in, consider using * [[scala.collection.immutable.HashMap]],
+  * which will generally have better performance. If you need insertion order, 
+  * consider a * [[scala.collection.immutable.SeqMap]], which does not need to
+  * have an ordering supplied.
+  *
+  *  @example {{{
+  *  import scala.collection.immutable.TreeMap
+  *
+  *  // Make a TreeMap via the companion object factory
+  *  val weekdays = TreeMap(
+  *    2 -> "Monday",
+  *    3 -> "Tuesday",
+  *    4 -> "Wednesday",
+  *    5 -> "Thursday",
+  *    6 -> "Friday"
+  *  )
+  *  // TreeMap(2 -> Monday, 3 -> Tuesday, 4 -> Wednesday, 5 -> Thursday, 6 -> Friday)
+  *
+  *  val days = weekdays ++ List(1 -> "Sunday", 7 -> "Saturday")
+  *  // TreeMap(1 -> Sunday, 2 -> Monday, 3 -> Tuesday, 4 -> Wednesday, 5 -> Thursday, 6 -> Friday, 7 -> Saturday)
+  *
+  *  val day3 = days.get(3) // Some("Tuesday")
+  *
+  *  val rangeOfDays = days.range(2, 5) // TreeMap(2 -> Monday, 3 -> Tuesday, 4 -> Wednesday)
+  *
+  *  val daysUntil2 = days.rangeUntil(2) // TreeMap(1 -> Sunday)
+  *  val daysTo2 = days.rangeTo(2) // TreeMap(1 -> Sunday, 2 -> Monday)
+  *  val daysAfter5 = days.rangeFrom(5) //  TreeMap(5 -> Thursday, 6 -> Friday, 7 -> Saturday)
+  *  }}}
   *
   *  @tparam K         the type of the keys contained in this tree map.
   *  @tparam V         the type of the values associated with the keys.
   *  @param ordering   the implicit ordering used to compare objects of type `A`.
   *
-  *  @author  Erik Stenman
-  *  @author  Matthias Zenger
-  *  @since   1
   *  @see [[http://docs.scala-lang.org/overviews/collections/concrete-immutable-collection-classes.html#red-black-trees "Scala's Collection Library overview"]]
   *  section on `Red-Black Trees` for more information.
   *
@@ -40,24 +72,56 @@ import scala.collection.mutable.{Builder, ReusableBuilder}
 final class TreeMap[K, +V] private (private val tree: RB.Tree[K, V])(implicit val ordering: Ordering[K])
   extends AbstractMap[K, V]
     with SortedMap[K, V]
-    with SortedMapOps[K, V, TreeMap, TreeMap[K, V]]
-    with StrictOptimizedIterableOps[(K, V), Iterable, TreeMap[K, V]]
-    with StrictOptimizedMapOps[K, V, Map, TreeMap[K, V]]
-    with StrictOptimizedSortedMapOps[K, V, TreeMap, TreeMap[K, V]] {
+    with StrictOptimizedSortedMapOps[K, V, TreeMap, TreeMap[K, V]]
+    with SortedMapFactoryDefaults[K, V, TreeMap, Iterable, Map]
+    with DefaultSerializable {
 
   def this()(implicit ordering: Ordering[K]) = this(null)(ordering)
 
-  private[this] def newMapOrSelf[V1 >: V](t: RB.Tree[K, V1]) = if(t eq tree) this else new TreeMap[K, V1](t)
+  private[this] def newMapOrSelf[V1 >: V](t: RB.Tree[K, V1]): TreeMap[K, V1] = if(t eq tree) this else new TreeMap[K, V1](t)
 
-  override def sortedMapFactory = TreeMap
+  override def sortedMapFactory: SortedMapFactory[TreeMap] = TreeMap
 
   def iterator: Iterator[(K, V)] = RB.iterator(tree)
 
   def keysIteratorFrom(start: K): Iterator[K] = RB.keysIterator(tree, Some(start))
 
+  override def keySet: TreeSet[K] = new TreeSet(tree)(ordering)
+
   def iteratorFrom(start: K): Iterator[(K, V)] = RB.iterator(tree, Some(start))
 
   override def valuesIteratorFrom(start: K): Iterator[V] = RB.valuesIterator(tree, Some(start))
+
+  override def stepper[S <: Stepper[_]](implicit shape: StepperShape[(K, V), S]): S with EfficientSplit =
+    shape.parUnbox(
+      scala.collection.convert.impl.AnyBinaryTreeStepper.from[(K, V), RB.Tree[K, V]](
+        size, tree, _.left, _.right, x => (x.key, x.value)
+      )
+    )
+
+  override def keyStepper[S <: Stepper[_]](implicit shape: StepperShape[K, S]): S with EfficientSplit = {
+    import scala.collection.convert.impl._
+    type T = RB.Tree[K, V]
+    val s = shape.shape match {
+      case StepperShape.IntShape    => IntBinaryTreeStepper.from[T]   (size, tree, _.left, _.right, _.key.asInstanceOf[Int])
+      case StepperShape.LongShape   => LongBinaryTreeStepper.from[T]  (size, tree, _.left, _.right, _.key.asInstanceOf[Long])
+      case StepperShape.DoubleShape => DoubleBinaryTreeStepper.from[T](size, tree, _.left, _.right, _.key.asInstanceOf[Double])
+      case _         => shape.parUnbox(AnyBinaryTreeStepper.from[K, T](size, tree, _.left, _.right, _.key))
+    }
+    s.asInstanceOf[S with EfficientSplit]
+  }
+
+  override def valueStepper[S <: Stepper[_]](implicit shape: StepperShape[V, S]): S with EfficientSplit = {
+    import scala.collection.convert.impl._
+    type T = RB.Tree[K, V]
+    val s = shape.shape match {
+      case StepperShape.IntShape    => IntBinaryTreeStepper.from[T]    (size, tree, _.left, _.right, _.value.asInstanceOf[Int])
+      case StepperShape.LongShape   => LongBinaryTreeStepper.from[T]   (size, tree, _.left, _.right, _.value.asInstanceOf[Long])
+      case StepperShape.DoubleShape => DoubleBinaryTreeStepper.from[T] (size, tree, _.left, _.right, _.value.asInstanceOf[Double])
+      case _         => shape.parUnbox(AnyBinaryTreeStepper.from[V, T] (size, tree, _.left, _.right, _.value.asInstanceOf[V]))
+    }
+    s.asInstanceOf[S with EfficientSplit]
+  }
 
   def get(key: K): Option[V] = RB.get(tree, key)
 
@@ -116,7 +180,7 @@ final class TreeMap[K, +V] private (private val tree: RB.Tree[K, V])(implicit va
   override def range(from: K, until: K): TreeMap[K,V] = newMapOrSelf(RB.range(tree, from, until))
 
   override def foreach[U](f: ((K, V)) => U): Unit = RB.foreach(tree, f)
-
+  override def foreachEntry[U](f: (K, V) => U): Unit = RB.foreachEntry(tree, f)
   override def size: Int = RB.count(tree)
   override def knownSize: Int = size
 
@@ -217,7 +281,7 @@ object TreeMap extends SortedMapFactory[TreeMap] {
         new TreeMap[K, V](t)
     }
 
-  def newBuilder[K, V](implicit ordering: Ordering[K]): Builder[(K, V), TreeMap[K, V]] = new ReusableBuilder[(K, V), TreeMap[K, V]] {
+  def newBuilder[K, V](implicit ordering: Ordering[K]): ReusableBuilder[(K, V), TreeMap[K, V]] = new ReusableBuilder[(K, V), TreeMap[K, V]] {
     private[this] var tree: RB.Tree[K, V] = null
     def addOne(elem: (K, V)): this.type = { tree = RB.update(tree, elem._1, elem._2, overwrite = true); this }
     override def addAll(xs: IterableOnce[(K, V)]): this.type = {

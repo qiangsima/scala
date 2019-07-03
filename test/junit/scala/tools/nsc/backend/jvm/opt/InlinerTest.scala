@@ -12,9 +12,9 @@ import scala.reflect.internal.util.JavaClearable
 import scala.tools.asm.Opcodes._
 import scala.tools.asm.tree._
 import scala.tools.nsc.backend.jvm.BackendReporting._
-import scala.tools.partest.ASMConverters._
-import scala.tools.testing.BytecodeTesting
-import scala.tools.testing.BytecodeTesting._
+import scala.tools.testkit.ASMConverters._
+import scala.tools.testkit.BytecodeTesting
+import scala.tools.testkit.BytecodeTesting._
 
 @RunWith(classOf[JUnit4])
 class InlinerTest extends BytecodeTesting {
@@ -1124,7 +1124,7 @@ class InlinerTest extends BytecodeTesting {
         |    // opt: re-write the invocation to the body method
         |  }
         |
-        |  @inline final def m1a(f: Long => Int) = f(1l)
+        |  @inline final def m1a(f: Long => Int) = f(1L)
         |  def t1a = m1a(l => l.toInt) // after inlining m1a, we have the same situation as in t1
         |
         |  def t2 = {
@@ -1158,7 +1158,7 @@ class InlinerTest extends BytecodeTesting {
         |
         |
         |  @inline final def m4a[T, U, V](f: (T, U) => V, x: T, y: U) = f(x, y) // invocation to generic apply(ObjectObject)Object
-        |  def t4a = m4a((x: Int, y: Double) => 1l + x + y.toLong, 1, 2d) // IndyLambda uses specilized JFunction2$mcJID$sp. after inlining m4a, similar to t4.
+        |  def t4a = m4a((x: Int, y: Double) => 1L + x + y.toLong, 1, 2d) // IndyLambda uses specilized JFunction2$mcJID$sp. after inlining m4a, similar to t4.
         |
         |  def t5 = {
         |    // no specialization for the comibnation of primitives
@@ -1191,7 +1191,7 @@ class InlinerTest extends BytecodeTesting {
         |  @inline final def m8[T, U, V](f: (T, U) => V, x: T, y: U) = f(x, y)
         |  // IndyLambda: JFunction2$mcJID$sp, SAM is apply$mcJID$sp, body method $anonfun(ID)J
         |  // boxes the int and double arguments and calls m8, unboxToLong the result
-        |  def t8 = m8((x: Int, y: Double) => 1l + x + y.toLong, 1, 2d)
+        |  def t8 = m8((x: Int, y: Double) => 1L + x + y.toLong, 1, 2d)
         |  // opt: after inlining m8, rewrite to the body method $anonfun(ID)J, which requires inserting unbox operations for the params, box for the result
         |  // the box-unbox pairs can then be optimized away
         |
@@ -1642,8 +1642,8 @@ class InlinerTest extends BytecodeTesting {
     assertInvoke(getMethod(c, "t5"), "T", "m3a") // could not inline
     assertNoInvoke(getMethod(c, "t6")) // both forwarders inlined, closure eliminated
 
-    assertInvoke(getMethod(c, "t7"), "T", "m1a$")
-    assertInvoke(getMethod(c, "t8"), "T", "m1b$")
+    assertNoInvoke(getMethod(c, "t7"))
+    assertNoInvoke(getMethod(c, "t8"))
 
     assertNoInvoke(getMethod(c, "t9"))
     assertNoInvoke(getMethod(c, "t10"))
@@ -2207,5 +2207,30 @@ class InlinerTest extends BytecodeTesting {
         List(mh.owner, mh.name)
     }
     assertEquals(List("A", "$anonfun$f$1"), args.head)
+  }
+
+  @Test
+  def sd618(): Unit = {
+    val code =
+      """trait T {
+        |  final def m1 = 1 // trivial
+        |  final def m2 = p // forwarder
+        |  @noinline def p = 42
+        |}
+        |
+        |object TT extends T // gets mixin forwarders m1 / m2 which call the static T.m1$ / T.m2$
+        |
+        |class C {
+        |  def t1a(t: T) = t.m1 // inlined, so we get 1
+        |  def t1b = TT.m1      // mixin forwarder is inlined, static forwarder then as well because the final method is trivial
+        |  def t2a(t: T) = t.m2 // inlined, so we get T.p
+        |  def t2b = TT.m2      // mixin forwarder is inlined, static forwarder then as well because the final method is forwarder
+        |}
+      """.stripMargin
+    val c :: _ = compileClasses(code)
+    assertNoInvoke(getMethod(c, "t1a"))
+    assertNoInvoke(getMethod(c, "t1b"))
+    assertInvoke(getMethod(c, "t2a"), "T", "p")
+    assertInvoke(getMethod(c, "t2b"), "T", "p")
   }
 }

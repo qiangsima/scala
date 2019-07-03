@@ -5,7 +5,6 @@ import java.{util => ju}
 import org.junit.Assert.{assertEquals, assertTrue}
 import org.junit.Test
 
-import scala.collection.convert.{DecorateAsJava, DecorateAsScala}
 import scala.collection.immutable.ChampMapSmokeTest.{emptyMap, mkTuple}
 
 object ChampSetSmokeTest {
@@ -28,8 +27,7 @@ object ChampSetSmokeTest {
 
 }
 
-class ChampSetSmokeTest extends DecorateAsJava with DecorateAsScala {
-
+class ChampSetSmokeTest {
   import ChampSetSmokeTest._
 
   @Test def testNodeValNode(): Unit = {
@@ -111,7 +109,7 @@ class ChampSetSmokeTest extends DecorateAsJava with DecorateAsScala {
     assertEquals(xs, ys)
   }
 
-  @Test def RemovalFromCollisonNodeEqualsSingelton(): Unit = {
+  @Test def RemovalFromCollisionNodeEqualsSingleton(): Unit = {
     val hash98304_obj1 = mkValue(1, 98304)
     val hash98304_obj2 = mkValue(2, 98304)
     val xs: Set[CustomHashInt] = setOf(hash98304_obj1)

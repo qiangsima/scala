@@ -30,9 +30,6 @@ import scala.language.higherKinds
  *    1. symmetric: `equiv(x, y) == equiv(y, x)` for any `x` and `y` of type `T`.
  *    1. transitive: if `equiv(x, y) == true` and `equiv(y, z) == true`, then
  *       `equiv(x, z) == true` for any `x`, `y`, and `z` of type `T`.
- *
- *  @author  Geoffrey Washburn, Paul Phillips
- *  @since 2.7
  */
 
 trait Equiv[T] extends Any with Serializable {
@@ -49,7 +46,7 @@ trait LowPriorityEquiv {
    * comparing instances of types for which equality isn't well-defined or implemented.
    * (For example, it does not make sense to compare two `Function1` instances.)
    *
-   * Use `Equiv.universal` explicitly instead. If you really want an implicit univeral `Equiv` instance
+   * Use `Equiv.universal` explicitly instead. If you really want an implicit universal `Equiv` instance
    * despite the potential problems, consider `implicit def universalEquiv[T]: Equiv[T] = universal[T]`.
    */
   @deprecated("Use explicit Equiv.universal instead. See Scaladoc entry for more information: " +

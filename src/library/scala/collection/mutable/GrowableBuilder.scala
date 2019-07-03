@@ -19,9 +19,6 @@ package collection.mutable
   *
   * GrowableBuilders can produce only a single instance of the collection they are growing.
   *
-  * @author Paul Phillips
-  * @since 2.8
-  *
   * @define Coll `GrowingBuilder`
   * @define coll growing builder
   */
@@ -35,4 +32,6 @@ class GrowableBuilder[Elem, To <: Growable[Elem]](protected val elems: To)
   def addOne(elem: Elem): this.type = { elems += elem; this }
 
   override def addAll(xs: IterableOnce[Elem]): this.type = { elems.addAll(xs); this }
+
+  override def knownSize: Int = elems.knownSize
 }

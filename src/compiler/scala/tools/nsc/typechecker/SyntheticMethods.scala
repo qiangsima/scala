@@ -13,8 +13,6 @@
 package scala.tools.nsc
 package typechecker
 
-import scala.language.postfixOps
-
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 
@@ -71,7 +69,7 @@ trait SyntheticMethods extends ast.TreeDSL {
    */
   def addSyntheticMethods(templ: Template, clazz0: Symbol, context: Context): Template = {
     val syntheticsOk = (phase.id <= currentRun.typerPhase.id) && {
-      symbolsToSynthesize(clazz0) filter (_ matchingSymbol clazz0.info isSynthetic) match {
+      symbolsToSynthesize(clazz0).filter(_.matchingSymbol(clazz0.info).isSynthetic) match {
         case Nil  => true
         case syms => log("Not adding synthetic methods: already has " + syms.mkString(", ")) ; false
       }
@@ -301,6 +299,11 @@ trait SyntheticMethods extends ast.TreeDSL {
       createMethod(nme.hashCode_, Nil, IntTpe) { m =>
         val accumulator = m.newVariable(newTermName("acc"), m.pos, SYNTHETIC) setInfo IntTpe
         val valdef      = ValDef(accumulator, Literal(Constant(0xcafebabe)))
+        val mixPrefix   =
+          Assign(
+            Ident(accumulator),
+            callStaticsMethod("mix")(Ident(accumulator),
+              Apply(gen.mkAttributedSelect(gen.mkAttributedSelect(mkThis, Product_productPrefix), Object_hashCode), Nil)))
         val mixes       = accessors map (acc =>
           Assign(
             Ident(accumulator),
@@ -309,7 +312,7 @@ trait SyntheticMethods extends ast.TreeDSL {
         )
         val finish = callStaticsMethod("finalizeHash")(Ident(accumulator), Literal(Constant(arity)))
 
-        Block(valdef :: mixes, finish)
+        Block(valdef :: mixPrefix :: mixes, finish)
       }
     }
     def chooseHashcode = {

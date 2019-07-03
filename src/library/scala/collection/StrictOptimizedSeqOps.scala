@@ -20,8 +20,8 @@ import scala.language.higherKinds
   */
 trait StrictOptimizedSeqOps [+A, +CC[_], +C]
   extends Any
-    with StrictOptimizedIterableOps[A, CC, C]
-    with SeqOps[A, CC, C] {
+    with SeqOps[A, CC, C]
+    with StrictOptimizedIterableOps[A, CC, C] {
 
   override def distinctBy[B](f: A => B): C = {
     val builder = newSpecificBuilder
@@ -64,9 +64,6 @@ trait StrictOptimizedSeqOps [+A, +CC[_], +C]
     b.result()
   }
 
-  // Must override here to ensure that `concat` is still an alias for `appendedAll` since it is overridden in `StrictOptimizedIterableOps`
-  override def concat[B >: A](suffix: IterableOnce[B]): CC[B] = appendedAll(suffix)
-
   override def padTo[B >: A](len: Int, elem: B): CC[B] = {
     val b = iterableFactory.newBuilder[B]
     val L = size
@@ -80,4 +77,27 @@ trait StrictOptimizedSeqOps [+A, +CC[_], +C]
     b.result()
   }
 
+  override def diff[B >: A](that: Seq[B]): C = {
+    val occ = occCounts(that)
+    val b = newSpecificBuilder
+    for (x <- this) {
+      val ox = occ(x)  // Avoid multiple map lookups
+      if (ox == 0) b += x
+      else occ(x) = ox - 1
+    }
+    b.result()
+  }
+
+  override def intersect[B >: A](that: Seq[B]): C = {
+    val occ = occCounts(that)
+    val b = newSpecificBuilder
+    for (x <- this) {
+      val ox = occ(x)  // Avoid multiple map lookups
+      if (ox > 0) {
+        b += x
+        occ(x) = ox - 1
+      }
+    }
+    b.result()
+  }
 }

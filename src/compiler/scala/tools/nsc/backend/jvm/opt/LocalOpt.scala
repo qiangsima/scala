@@ -71,9 +71,6 @@ import scala.tools.nsc.backend.jvm.opt.BytecodeUtils._
  *   + enables downstream:
  *     - stale stores (a stored value may not be loaded anymore)
  *     - store-load pairs (a load n may now be right after a store n)
- *   + NOTE: copy propagation is only executed once, in the first fixpoint loop iteration. none of
- *     the other optimizations enables further copy prop. we still run it as part of the loop
- *     because it requires unreachable code to be eliminated.
  *
  * stale stores (replace STORE by POP), rewrites `ClassTag(x).newArray`, inlines `array_apply/update`
  *   + enables UPSTREAM:
@@ -612,6 +609,7 @@ abstract class LocalOpt {
 
     // precondition: !isSubType(aDescOrIntN, bDescOrIntN)
     def isUnrelated(aDescOrIntN: String, bDescOrIntN: String): Boolean = {
+      @tailrec
       def impl(aTp: BType, bTp: BType): Boolean = {
         ((aTp, bTp): @unchecked) match {
           case (aa: ArrayBType, ba: ArrayBType) =>
@@ -716,6 +714,7 @@ object LocalOptImpls {
    */
   def removeEmptyExceptionHandlers(method: MethodNode): RemoveHandlersResult = {
     /** True if there exists code between start and end. */
+    @tailrec
     def containsExecutableCode(start: AbstractInsnNode, end: LabelNode): Boolean = {
       start != end && ((start.getOpcode: @switch) match {
         // FrameNode, LabelNode and LineNumberNode have opcode == -1.
@@ -863,6 +862,7 @@ object LocalOptImpls {
    * lexically preceding label declaration.
    */
   def removeEmptyLineNumbers(method: MethodNode): Boolean = {
+    @tailrec
     def isEmpty(node: AbstractInsnNode): Boolean = node.getNext match {
       case null => true
       case l: LineNumberNode => true

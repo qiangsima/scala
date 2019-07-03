@@ -15,6 +15,7 @@ package reflect
 package internal
 
 import Flags._
+import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 import scala.reflect.macros.Attachments
@@ -464,7 +465,7 @@ trait Trees extends api.Trees {
   case class LabelDef(name: TermName, params: List[Ident], rhs: Tree)
        extends DefTree with TermTree with LabelDefApi {
     override def transform(transformer: Transformer): Tree =
-      transformer.treeCopy.LabelDef(this, name, transformer.transformIdents(params), transformer.transform(rhs)) //bq: Martin, once, atOwner(...) works, also change `LambdaLifter.proxy'
+      transformer.treeCopy.LabelDef(this, name, transformer.transformIdents(params), transformer.transform(rhs)) //bq: Martin, once, atOwner(...) works, also change `LambdaLifter.proxy`
     override def traverse(traverser: Traverser): Unit = {
       traverser.traverseName(name)
       traverser.traverseParams(params)
@@ -485,9 +486,11 @@ trait Trees extends api.Trees {
     def isSpecific = !isWildcard
     def isRename = rename != null && rename != nme.WILDCARD && name != rename
     private def isLiteralWildcard = name == nme.WILDCARD && rename == nme.WILDCARD
+    private def sameName(name: Name, other: Name) =  (name eq other) || (name ne null) && name.start == other.start && name.length == other.length
+    def hasName(other: Name) = sameName(name, other)
     def introduces(target: Name) =
       if (target == nme.WILDCARD) isLiteralWildcard
-      else target != null && target == rename
+      else target != null && sameName(rename, target)
   }
   object ImportSelector extends ImportSelectorExtractor {
     val wild     = ImportSelector(nme.WILDCARD, -1, null, -1)
@@ -957,6 +960,7 @@ trait Trees extends api.Trees {
 
     def original: Tree = orig
     def setOriginal(tree: Tree): this.type = {
+      @tailrec
       def followOriginal(t: Tree): Tree = t match {
         case tt: TypeTree => followOriginal(tt.original)
         case t => t
@@ -1660,7 +1664,8 @@ trait Trees extends api.Trees {
 
   // Create a readable string describing a substitution.
   private def substituterString(fromStr: String, toStr: String, from: List[Any], to: List[Any]): String = {
-    "subst[%s, %s](%s)".format(fromStr, toStr, from.lazyZip(to).map(_ + " -> " + _).mkString(", "))
+    val toAndFro = from.lazyZip(to).map((f, t) => s"$f -> $t").mkString("(", ", ", ")")
+    s"subst[$fromStr, $toStr]$toAndFro"
   }
 
   // NOTE: calls shallowDuplicate on trees in `to` to avoid problems when symbols in `from`
@@ -1670,6 +1675,7 @@ trait Trees extends api.Trees {
   class TreeSubstituter(from: List[Symbol], to: List[Tree]) extends InternalTransformer {
     override def transform(tree: Tree): Tree = tree match {
       case Ident(_) =>
+        @tailrec
         def subst(from: List[Symbol], to: List[Tree]): Tree =
           if (from.isEmpty) tree
           else if (tree.symbol == from.head) to.head.shallowDuplicate // TODO: does it ever make sense *not* to perform a shallowDuplicate on `to.head`?
@@ -1729,6 +1735,7 @@ trait Trees extends api.Trees {
     val symSubst = new SubstSymMap(from, to)
     private[this] var mutatedSymbols: List[Symbol] = Nil
     override def transform(tree: Tree): Tree = {
+      @tailrec
       def subst(from: List[Symbol], to: List[Symbol]): Unit = {
         if (!from.isEmpty)
           if (tree.symbol == from.head) tree setSymbol to.head
@@ -1806,8 +1813,7 @@ trait Trees extends api.Trees {
     var result: Option[Tree] = None
     override def traverse(t: Tree): Unit = {
       if (result.isEmpty) {
-        if (p(t)) result = Some(t)
-        t.traverse(this)
+        if (p(t)) result = Some(t) else t.traverse(this)
       }
     }
   }

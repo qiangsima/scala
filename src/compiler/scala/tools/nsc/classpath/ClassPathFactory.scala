@@ -22,7 +22,8 @@ import scala.tools.nsc.util.ClassPath
  * Provides factory methods for classpath. When creating classpath instances for a given path,
  * it uses proper type of classpath depending on a types of particular files containing sources or classes.
  */
-class ClassPathFactory(settings: Settings, closeableRegistry: CloseableRegistry) {
+class ClassPathFactory(settings: Settings, closeableRegistry: CloseableRegistry = new CloseableRegistry) {
+
   /**
     * Create a new classpath based on the abstract file.
     */
@@ -78,7 +79,7 @@ class ClassPathFactory(settings: Settings, closeableRegistry: CloseableRegistry)
 }
 
 object ClassPathFactory {
-  def newClassPath(file: AbstractFile, settings: Settings, closeableRegistry: CloseableRegistry): ClassPath = file match {
+  def newClassPath(file: AbstractFile, settings: Settings, closeableRegistry: CloseableRegistry = new CloseableRegistry): ClassPath = file match {
     case vd: VirtualDirectory => VirtualDirectoryClassPath(vd)
     case _ =>
       if (file.isJarOrZip)

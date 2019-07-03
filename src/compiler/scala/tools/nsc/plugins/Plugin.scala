@@ -33,7 +33,6 @@ import scala.util.{Failure, Success, Try}
  *  }}}
  *
  *  @author Lex Spoon
- *  @version 1.0, 2007-5-21
  */
 abstract class Plugin {
   /** The name of this plugin */
@@ -74,7 +73,7 @@ abstract class Plugin {
     true
   }
 
-  @deprecated("use Plugin#init instead", since="2.11.0")
+  @deprecatedOverriding("use Plugin#init instead", since="2.11.0")
   def processOptions(options: List[String], error: String => Unit): Unit = {
     if (!options.isEmpty) error(s"Error: $name takes no options")
   }
@@ -89,7 +88,6 @@ abstract class Plugin {
 /** ...
  *
  *  @author Lex Spoon
- *  @version 1.0, 2007-5-21
  */
 object Plugin {
 

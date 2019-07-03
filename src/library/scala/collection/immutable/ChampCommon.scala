@@ -17,8 +17,7 @@ import java.lang.Integer.bitCount
 import java.lang.Math.ceil
 import java.lang.System.arraycopy
 
-private[immutable] final object Node {
-
+private[collection] object Node {
   final val HashCodeLength = 32
 
   final val BitPartitionSize = 5
@@ -26,12 +25,6 @@ private[immutable] final object Node {
   final val BitPartitionMask = (1 << BitPartitionSize) - 1
 
   final val MaxDepth = ceil(HashCodeLength.toDouble / BitPartitionSize).toInt
-
-  final val SizeEmpty = 0
-
-  final val SizeOne = 1
-
-  final val SizeMoreThanOne = 2
 
   final val BranchingFactor = 1 << BitPartitionSize
 
@@ -45,7 +38,7 @@ private[immutable] final object Node {
 
 }
 
-private[immutable] abstract class Node[T <: Node[T]] {
+private[collection] abstract class Node[T <: Node[T]] {
 
   def hasNodes: Boolean
 
@@ -60,8 +53,6 @@ private[immutable] abstract class Node[T <: Node[T]] {
   def getPayload(index: Int): Any
 
   def getHash(index: Int): Int
-
-  def sizePredicate: Int
 
   def cachedJavaKeySetHashCode: Int
 
@@ -112,13 +103,16 @@ private[immutable] abstract class Node[T <: Node[T]] {
   * node before traversing sub-nodes (left to right).
   *
   * @tparam T the trie node type we are iterating over
-  *
-  * @author   Michael J. Steindorfer
   */
 private[immutable] abstract class ChampBaseIterator[T <: Node[T]] {
 
   import Node.MaxDepth
 
+  // Note--this code is duplicated to a large extent both in
+  // ChampBaseReverseIterator and in convert.impl.ChampStepperBase.
+  // If you change this code, check those also in case they also
+  // need to be modified.
+  
   protected var currentValueCursor: Int = 0
   protected var currentValueLength: Int = 0
   protected var currentValueNode: T = _
@@ -197,8 +191,6 @@ private[immutable] abstract class ChampBaseIterator[T <: Node[T]] {
   * iterator performs a depth-first post-order traversal, traversing sub-nodes (right to left).
   *
   * @tparam T the trie node type we are iterating over
-  *
-  * @author   Michael J. Steindorfer
   */
 private[immutable] abstract class ChampBaseReverseIterator[T <: Node[T]] {
 

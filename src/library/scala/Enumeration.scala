@@ -15,7 +15,7 @@ package scala
 import scala.collection.{SpecificIterableFactory, StrictOptimizedIterableOps, View, immutable, mutable}
 import java.lang.reflect.{Field => JField, Method => JMethod}
 
-import scala.annotation.implicitNotFound
+import scala.annotation.{implicitNotFound, tailrec}
 import scala.reflect.NameTransformer._
 import scala.util.matching.Regex
 
@@ -83,7 +83,6 @@ import scala.util.matching.Regex
  *
  *  @param initial The initial value from which to count the integers that
  *                 identifies values at run-time.
- *  @author  Matthias Zenger
  */
 @SerialVersionUID(8476000850333817230L)
 abstract class Enumeration (initial: Int) extends Serializable {
@@ -189,7 +188,13 @@ abstract class Enumeration (initial: Int) extends Serializable {
   protected final def Value(i: Int, name: String): Value = new Val(i, name)
 
   private def populateNameMap(): Unit = {
-    val fields: Array[JField] = getClass.getDeclaredFields
+    @tailrec def getFields(clazz: Class[_], acc: Array[JField]): Array[JField] = {
+      if (clazz == null)
+        acc
+      else
+        getFields(clazz.getSuperclass, if (clazz.getDeclaredFields.isEmpty) acc else acc ++ clazz.getDeclaredFields)
+    }
+    val fields = getFields(getClass.getSuperclass, getClass.getDeclaredFields)
     def isValDef(m: JMethod): Boolean = fields exists (fd => fd.getName == m.getName && fd.getType == m.getReturnType)
 
     // The list of possible Value methods: 0-args which return a conforming type
@@ -266,7 +271,7 @@ abstract class Enumeration (initial: Int) extends Serializable {
   }
 
   /** An ordering by id for values of this set */
-  object ValueOrdering extends Ordering[Value] {
+  implicit object ValueOrdering extends Ordering[Value] {
     def compare(x: Value, y: Value): Int = x compare y
   }
 
@@ -296,7 +301,7 @@ abstract class Enumeration (initial: Int) extends Serializable {
     def excl (value: Value) = new ValueSet(nnIds - (value.id - bottomId))
     def iterator = nnIds.iterator map (id => thisenum.apply(bottomId + id))
     override def iteratorFrom(start: Value) = nnIds iteratorFrom start.id  map (id => thisenum.apply(bottomId + id))
-    override def className = thisenum + ".ValueSet"
+    override def className = s"$thisenum.ValueSet"
     /** Creates a bit mask for the zero-adjusted ids in this set as a
      *  new array of longs */
     def toBitMask: Array[Long] = nnIds.toBitMask
@@ -308,16 +313,14 @@ abstract class Enumeration (initial: Int) extends Serializable {
     def flatMap(f: Value => IterableOnce[Value]): ValueSet = fromSpecific(new View.FlatMap(toIterable, f))
 
     // necessary for disambiguation:
-    override def map[B](f: Value => B)(implicit @implicitNotFound(ValueSet.ordMsg) ev: Ordering[B]): SortedIterableCC[B] =
+    override def map[B](f: Value => B)(implicit @implicitNotFound(ValueSet.ordMsg) ev: Ordering[B]): immutable.SortedSet[B] =
       super[SortedSet].map[B](f)
-    override def flatMap[B](f: Value => IterableOnce[B])(implicit @implicitNotFound(ValueSet.ordMsg) ev: Ordering[B]): SortedIterableCC[B] =
+    override def flatMap[B](f: Value => IterableOnce[B])(implicit @implicitNotFound(ValueSet.ordMsg) ev: Ordering[B]): immutable.SortedSet[B] =
       super[SortedSet].flatMap[B](f)
-    override def zip[B](that: IterableOnce[B])(implicit @implicitNotFound(ValueSet.zipOrdMsg) ev: Ordering[(Value, B)]): SortedIterableCC[(Value, B)] =
+    override def zip[B](that: IterableOnce[B])(implicit @implicitNotFound(ValueSet.zipOrdMsg) ev: Ordering[(Value, B)]): immutable.SortedSet[(Value, B)] =
       super[SortedSet].zip[B](that)
-    override def collect[B](pf: PartialFunction[Value, B])(implicit @implicitNotFound(ValueSet.ordMsg) ev: Ordering[B]): SortedIterableCC[B] =
+    override def collect[B](pf: PartialFunction[Value, B])(implicit @implicitNotFound(ValueSet.ordMsg) ev: Ordering[B]): immutable.SortedSet[B] =
       super[SortedSet].collect[B](pf)
-
-    override protected[this] def writeReplace(): AnyRef = this
   }
 
   /** A factory object for value sets */

@@ -20,8 +20,10 @@ import scala.language.higherKinds
   * Trait that overrides operations to take advantage of strict builders.
   */
 trait StrictOptimizedSeqOps[+A, +CC[_], +C]
-  extends SeqOps[A, CC, C]
-    with collection.StrictOptimizedSeqOps[A, CC, C] {
+  extends Any
+    with SeqOps[A, CC, C]
+    with collection.StrictOptimizedSeqOps[A, CC, C]
+    with StrictOptimizedIterableOps[A, CC, C] {
 
   override def distinctBy[B](f: A => B): C = {
     if (lengthCompare(1) <= 0) coll
@@ -74,5 +76,7 @@ trait StrictOptimizedSeqOps[+A, +CC[_], +C]
     while (it.hasNext) b += it.next()
     b.result()
   }
+
+  override def sorted[B >: A](implicit ord: Ordering[B]): C = super.sorted(ord)
 
 }

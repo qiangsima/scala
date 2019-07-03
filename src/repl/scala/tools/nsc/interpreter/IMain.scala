@@ -67,9 +67,6 @@ import scala.util.control.NonFatal
   *  behaves exactly as does compiled code, including running at full speed.
   *  The main weakness is that redefining classes and methods is not handled
   *  properly, because rebinding at the Java level is technically difficult.
-  *
-  *  @author Moez A. Abdel-Gawad
-  *  @author Lex Spoon
   */
 class IMain(val settings: Settings, parentClassLoaderOverride: Option[ClassLoader], compilerSettings: Settings, val reporter: ReplReporter)
   extends Repl with Imports with PresentationCompilation with Closeable {
@@ -355,9 +352,6 @@ class IMain(val settings: Settings, parentClassLoaderOverride: Option[ClassLoade
       _runtimeClassLoader = new URLClassLoader(compilerClasspath, parentClassLoader)
       _runtimeClassLoader
     })
-
-  // Set the current Java "context" class loader to this interpreter's class loader
-  override def setContextClassLoader() = classLoader.setAsContext()
 
   def allDefinedNames: List[Name]  = exitingTyper(replScope.toList.map(_.name).sorted)
   def unqualifiedIds: List[String] = allDefinedNames.map(_.decode).sorted

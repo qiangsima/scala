@@ -27,8 +27,6 @@ import java.lang.{Integer, String}
   *  uses `null` to represent empty trees. This also means pattern matching cannot
   *  easily be used. The API represented by the RedBlackTree object tries to hide these
   *  optimizations behind a reasonably clean API.
-  *
-  *  @since 2.10
   */
 private[collection] object RedBlackTree {
 
@@ -156,6 +154,14 @@ private[collection] object RedBlackTree {
     if (tree.right ne null) _foreachKey(tree.right, f)
   }
 
+  def foreachEntry[A, B, U](tree:Tree[A,B], f: (A, B) => U):Unit = if (tree ne null) _foreachEntry(tree,f)
+
+  private[this] def _foreachEntry[A, B, U](tree: Tree[A, B], f: (A, B) => U): Unit = {
+    if (tree.left ne null) _foreachEntry(tree.left, f)
+    f(tree.key, tree.value)
+    if (tree.right ne null) _foreachEntry(tree.right, f)
+  }
+
   def iterator[A: Ordering, B](tree: Tree[A, B], start: Option[A] = None): Iterator[(A, B)] = new EntriesIterator(tree, start)
   def keysIterator[A: Ordering](tree: Tree[A, _], start: Option[A] = None): Iterator[A] = new KeysIterator(tree, start)
   def valuesIterator[A: Ordering, B](tree: Tree[A, B], start: Option[A] = None): Iterator[B] = new ValuesIterator(tree, start)
@@ -200,7 +206,7 @@ private[collection] object RedBlackTree {
     val cmp = ordering.compare(k, tree.key)
     if (cmp < 0) balanceLeft(isBlackTree(tree), tree.key, tree.value, upd(tree.left, k, v, overwrite), tree.right)
     else if (cmp > 0) balanceRight(isBlackTree(tree), tree.key, tree.value, tree.left, upd(tree.right, k, v, overwrite))
-    else if (overwrite || k != tree.key) mkTree(isBlackTree(tree), k, v, tree.left, tree.right)
+    else if (overwrite || k != tree.key) mkTree(isBlackTree(tree), tree.key, v, tree.left, tree.right)
     else tree
   }
   private[this] def updNth[A, B, B1 >: B](tree: Tree[A, B], idx: Int, k: A, v: B1, overwrite: Boolean): Tree[A, B1] = if (tree eq null) {

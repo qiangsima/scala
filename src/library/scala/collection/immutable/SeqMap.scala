@@ -14,8 +14,7 @@ package scala
 package collection
 package immutable
 
-import java.io.{ObjectInputStream, ObjectOutputStream}
-
+import scala.annotation.unchecked.uncheckedVariance
 import scala.collection.mutable.Builder
 
 /**
@@ -28,19 +27,21 @@ import scala.collection.mutable.Builder
   * @tparam K      the type of the keys contained in this linked map.
   * @tparam V      the type of the values associated with the keys in this linked map.
   *
-  * @author Matthew de Detrich
-  * @version 2.13
-  * @since 2.13
   * @define coll immutable seq map
   * @define Coll `immutable.SeqMap`
   */
 
 trait SeqMap[K, +V]
-  extends AbstractMap[K, V]
+  extends Map[K, V]
+    with collection.SeqMap[K, V]
     with MapOps[K, V, SeqMap, SeqMap[K, V]]
+    with MapFactoryDefaults[K, V, SeqMap, Iterable] {
+  override def mapFactory: MapFactory[SeqMap] = SeqMap
+}
+
 
 object SeqMap extends MapFactory[SeqMap] {
-  def empty[K, V]: SeqMap[K, V] = EmptyLinkedMap.asInstanceOf[SeqMap[K, V]]
+  def empty[K, V]: SeqMap[K, V] = EmptySeqMap.asInstanceOf[SeqMap[K, V]]
 
   def from[K, V](it: collection.IterableOnce[(K, V)]): SeqMap[K, V] =
     it match {
@@ -51,7 +52,7 @@ object SeqMap extends MapFactory[SeqMap] {
   def newBuilder[K, V]: Builder[(K, V), SeqMap[K, V]] = VectorMap.newBuilder
 
   @SerialVersionUID(3L)
-  private object EmptyLinkedMap extends SeqMap[Any, Nothing] {
+  private object EmptySeqMap extends SeqMap[Any, Nothing] with Serializable {
     override def size: Int = 0
     override def knownSize: Int = 0
     override def apply(key: Any) = throw new NoSuchElementException("key not found: " + key)

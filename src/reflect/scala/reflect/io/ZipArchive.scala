@@ -29,10 +29,6 @@ import scala.reflect.internal.JDK9Reflectors
  *  it is for performance: we come through here a lot on every run.  Be careful
  *  about changing it.
  *
- *  @author  Philippe Altherr (original version)
- *  @author  Paul Phillips (this one)
- *  @version 2.0,
- *
  *  ''Note:  This library is considered experimental and should not be used unless you know what you are doing.''
  */
 object ZipArchive {
@@ -280,6 +276,7 @@ final class URLZipArchive(val url: URL) extends ZipArchive(null) {
           val arr    = if (len == 0) Array.emptyByteArray else new Array[Byte](len)
           var offset = 0
 
+          @tailrec
           def loop(): Unit = {
             if (offset < len) {
               val read = in.read(arr, offset, len - offset)

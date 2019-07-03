@@ -16,12 +16,14 @@ package internal
 
 import java.net.URLClassLoader
 
-import scala.annotation.elidable
+import scala.annotation.{elidable, tailrec}
 import scala.collection.mutable
 import util._
 import java.util.concurrent.TimeUnit
 
+import scala.reflect.internal.settings.MutableSettings
 import scala.reflect.internal.{TreeGen => InternalTreeGen}
+import scala.reflect.io.AbstractFile
 
 abstract class SymbolTable extends macros.Universe
                               with Collections
@@ -47,7 +49,6 @@ abstract class SymbolTable extends macros.Universe
                               with Positions
                               with TypeDebugging
                               with Importers
-                              with Required
                               with CapturedVariables
                               with StdAttachments
                               with StdCreators
@@ -86,13 +87,19 @@ abstract class SymbolTable extends macros.Universe
 
   def shouldLogAtThisPhase = false
   def isPastTyper = false
-  def isDeveloper: Boolean = settings.debug
+  final def isDeveloper: Boolean = settings.debug.value || settings.developer.value
+  def picklerPhase: Phase
 
-  @deprecated("use devWarning if this is really a warning; otherwise use log", "2.11.0")
-  def debugwarn(msg: => String): Unit = devWarning(msg)
+  def erasurePhase: Phase
+
+  def settings: MutableSettings
 
   /** Override with final implementation for inlining. */
   def debuglog(msg:  => String): Unit = if (settings.debug) log(msg)
+
+  /** dev-warns if dev-warning is enabled and `cond` is true; no-op otherwise */
+  @inline final def devWarningIf(cond: => Boolean)(msg: => String): Unit =
+    if (isDeveloper && cond) devWarning(msg)
   def devWarning(msg: => String): Unit = if (isDeveloper) Console.err.println(msg)
   def throwableAsString(t: Throwable): String = "" + t
   def throwableAsString(t: Throwable, maxFrames: Int): String = t.getStackTrace take maxFrames mkString "\n  at "
@@ -144,32 +151,19 @@ abstract class SymbolTable extends macros.Universe
     result
   }
 
-  // Getting in front of Predef's asserts to supplement with more info; see `supplementErrorMessage`.
-  // This has the happy side effect of masking the one argument forms of assert/require
-  // (but for now they're reproduced here, because there are a million uses internal and external to fix).
   @inline
-  final def assert(assertion: Boolean, message: => Any): Unit = {
-    // calling Predef.assert would send a freshly allocated closure wrapping the one received as argument.
+  final def assert(assertion: Boolean, message: => Any): Unit =
     if (!assertion) throwAssertionError(message)
-  }
 
-  // Let's consider re-deprecating this in the 2.13 series, to encourage informative messages.
-  //@deprecated("prefer to use the two-argument form", since = "2.12.5")
-  final def assert(assertion: Boolean): Unit = {
-    assert(assertion, "")
-  }
+  @deprecated("consider supplying an explanatory message", since = "2.12.5")
+  final def assert(assertion: Boolean): Unit = assert(assertion, "")
 
   @inline
-  final def require(requirement: Boolean, message: => Any): Unit = {
-    // calling Predef.require would send a freshly allocated closure wrapping the one received as argument.
+  final def require(requirement: Boolean, message: => Any): Unit =
     if (!requirement) throwRequirementError(message)
-  }
 
-  // Let's consider re-deprecating this in the 2.13 series, to encourage informative messages.
-  //@deprecated("prefer to use the two-argument form", since = "2.12.5")
-  final def require(requirement: Boolean): Unit = {
-    require(requirement, "")
-  }
+  @deprecated("consider supplying an explanatory message", since = "2.12.5")
+  final def require(requirement: Boolean): Unit = require(requirement, "")
 
   // extracted from `assert`/`require` to make them as small (and inlineable) as possible
   private[internal] def throwAssertionError(msg: Any): Nothing =
@@ -331,6 +325,7 @@ abstract class SymbolTable extends macros.Universe
     }
 
   final def isValidForBaseClasses(period: Period): Boolean = {
+    @tailrec
     def noChangeInBaseClasses(it: InfoTransformer, limit: Phase#Id): Boolean = (
       it.pid >= limit ||
       !it.changesBaseClasses && noChangeInBaseClasses(it.next, limit)
@@ -359,7 +354,7 @@ abstract class SymbolTable extends macros.Universe
       }
     }
     // enter decls of parent classes
-    for (p <- container.parentSymbols) {
+    for (p <- container.parentSymbolsIterator) {
       if (p != definitions.ObjectClass) {
         openPackageModule(p, dest)
       }
@@ -516,6 +511,9 @@ abstract class SymbolTable extends macros.Universe
    * Adds the `sm` String interpolator to a [[scala.StringContext]].
    */
   implicit val StringContextStripMarginOps: StringContext => StringContextStripMarginOps = util.StringContextStripMarginOps
+
+  protected[scala] def currentRunProfilerBeforeCompletion(root: Symbol, associatedFile: AbstractFile): Unit = ()
+  protected[scala] def currentRunProfilerAfterCompletion(root: Symbol, associatedFile: AbstractFile): Unit = ()
 }
 
 trait SymbolTableStats {

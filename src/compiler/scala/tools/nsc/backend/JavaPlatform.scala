@@ -26,7 +26,7 @@ trait JavaPlatform extends Platform {
 
   private[nsc] var currentClassPath: Option[ClassPath] = None
 
-  private[nsc] def classPath: ClassPath = {
+  protected[nsc] def classPath: ClassPath = {
     if (currentClassPath.isEmpty) currentClassPath = Some(new PathResolver(settings, global.closeableRegistry).result)
     currentClassPath.get
   }
@@ -57,7 +57,7 @@ trait JavaPlatform extends Platform {
    */
   def isMaybeBoxed(sym: Symbol) = {
     (sym == ObjectClass) ||
-    (sym == JavaSerializableClass) ||
+    (sym == SerializableClass) ||
     (sym == ComparableClass) ||
     (sym isNonBottomSubClass BoxedNumberClass) ||
     (sym isNonBottomSubClass BoxedCharacterClass) ||

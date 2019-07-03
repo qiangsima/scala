@@ -14,7 +14,8 @@ package scala
 package util
 package control
 
-import scala.reflect.{ ClassTag, classTag }
+import scala.annotation.tailrec
+import scala.reflect.{ClassTag, classTag}
 import scala.language.implicitConversions
 
 /** Classes representing the components of exception handling.
@@ -147,8 +148,6 @@ import scala.language.implicitConversions
  *  @groupdesc logic-container Containers for catch and finally behavior.
  *
  *  @define protectedExceptions `ControlThrowable` or `InterruptedException`
- *
- *  @author Paul Phillips
  */
 
 object Exception {
@@ -358,6 +357,7 @@ object Exception {
    *  @group composition-catch
    */
   def unwrapping[T](exceptions: Class[_]*): Catch[T] = {
+    @tailrec
     def unwrap(x: Throwable): Throwable =
       if (wouldMatch(x, exceptions) && x.getCause != null) unwrap(x.getCause)
       else x
